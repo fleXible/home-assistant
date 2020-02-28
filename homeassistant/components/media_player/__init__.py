@@ -36,9 +36,9 @@ from homeassistant.const import (
     SERVICE_VOLUME_MUTE,
     SERVICE_VOLUME_SET,
     SERVICE_VOLUME_UP,
-    STATE_IDLE,
     STATE_OFF,
     STATE_PLAYING,
+    STATE_UNKNOWN,
 )
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 import homeassistant.helpers.config_validation as cv
@@ -46,16 +46,15 @@ from homeassistant.helpers.config_validation import (  # noqa: F401
     PLATFORM_SCHEMA,
     PLATFORM_SCHEMA_BASE,
 )
-from homeassistant.helpers.entity import Entity
+from homeassistant.helpers.entity import ToggleEntity
 from homeassistant.helpers.entity_component import EntityComponent
-from homeassistant.helpers.network import get_url
-from homeassistant.loader import bind_hass
 
 from .const import (
     ATTR_APP_ID,
     ATTR_APP_NAME,
     ATTR_INPUT_SOURCE,
     ATTR_INPUT_SOURCE_LIST,
+    ATTR_IS_ON,
     ATTR_MEDIA_ALBUM_ARTIST,
     ATTR_MEDIA_ALBUM_NAME,
     ATTR_MEDIA_ARTIST,
@@ -155,19 +154,6 @@ ATTR_TO_PROPERTY = [
     ATTR_SOUND_MODE,
     ATTR_MEDIA_SHUFFLE,
 ]
-
-
-@bind_hass
-def is_on(hass, entity_id=None):
-    """
-    Return true if specified media player entity_id is on.
-
-    Check all media player if no entity_id specified.
-    """
-    entity_ids = [entity_id] if entity_id else hass.states.entity_ids(DOMAIN)
-    return any(
-        not hass.states.is_state(entity_id, STATE_OFF) for entity_id in entity_ids
-    )
 
 
 WS_TYPE_MEDIA_PLAYER_THUMBNAIL = "media_player_thumbnail"
@@ -338,7 +324,7 @@ async def async_unload_entry(hass, entry):
     return await hass.data[DOMAIN].async_unload_entry(entry)
 
 
-class MediaPlayerEntity(Entity):
+class MediaPlayerEntity(ToggleEntity):
     """ABC for media player entities."""
 
     _access_token: Optional[str] = None
@@ -348,6 +334,11 @@ class MediaPlayerEntity(Entity):
     def state(self):
         """State of the player."""
         return None
+
+    @property
+    def is_on(self) -> bool:
+        """Return True if entity is on."""
+        return self.state not in [None, STATE_OFF, STATE_UNKNOWN]
 
     @property
     def access_token(self) -> str:
@@ -512,22 +503,6 @@ class MediaPlayerEntity(Entity):
     def supported_features(self):
         """Flag media player features that are supported."""
         return 0
-
-    def turn_on(self):
-        """Turn the media player on."""
-        raise NotImplementedError()
-
-    async def async_turn_on(self):
-        """Turn the media player on."""
-        await self.hass.async_add_job(self.turn_on)
-
-    def turn_off(self):
-        """Turn the media player off."""
-        raise NotImplementedError()
-
-    async def async_turn_off(self):
-        """Turn the media player off."""
-        await self.hass.async_add_job(self.turn_off)
 
     def mute_volume(self, mute):
         """Mute the volume."""
@@ -701,18 +676,6 @@ class MediaPlayerEntity(Entity):
         """Boolean if shuffle is supported."""
         return bool(self.supported_features & SUPPORT_SHUFFLE_SET)
 
-    async def async_toggle(self):
-        """Toggle the power on the media player."""
-        if hasattr(self, "toggle"):
-            # pylint: disable=no-member
-            await self.hass.async_add_job(self.toggle)
-            return
-
-        if self.state in [STATE_OFF, STATE_IDLE]:
-            await self.async_turn_on()
-        else:
-            await self.async_turn_off()
-
     async def async_volume_up(self):
         """Turn volume up for media player.
 
@@ -754,7 +717,7 @@ class MediaPlayerEntity(Entity):
     @property
     def entity_picture(self):
         """Return image of the media playing."""
-        if self.state == STATE_OFF:
+        if not self.is_on:
             return None
 
         if self.media_image_remotely_accessible:
@@ -778,8 +741,11 @@ class MediaPlayerEntity(Entity):
     @property
     def capability_attributes(self):
         """Return capability attributes."""
-        supported_features = self.supported_features or 0
+        supported_features = self.supported_features
         data = {}
+
+        if supported_features & (SUPPORT_TURN_ON | SUPPORT_TURN_OFF):
+            data[ATTR_IS_ON] = self.is_on
 
         if supported_features & SUPPORT_SELECT_SOURCE:
             source_list = self.source_list
@@ -796,7 +762,7 @@ class MediaPlayerEntity(Entity):
     @property
     def state_attributes(self):
         """Return the state attributes."""
-        if self.state == STATE_OFF:
+        if not self.is_on:
             return None
 
         state_attr = {}

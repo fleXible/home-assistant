@@ -98,15 +98,19 @@ async def test_turning_off_and_on(hass):
     assert hass.states.is_state(TEST_ENTITY_ID, "playing")
 
     await common.async_turn_off(hass, TEST_ENTITY_ID)
-    assert hass.states.is_state(TEST_ENTITY_ID, "off")
-    assert not mp.is_on(hass, TEST_ENTITY_ID)
+    state = hass.states.get(TEST_ENTITY_ID)
+    assert state.state == "off"
+    assert state.attributes.get("is_on") is False
 
     await common.async_turn_on(hass, TEST_ENTITY_ID)
-    assert hass.states.is_state(TEST_ENTITY_ID, "playing")
+    state = hass.states.get(TEST_ENTITY_ID)
+    assert state.state == "playing"
+    assert state.attributes.get("is_on") is True
 
     await common.async_toggle(hass, TEST_ENTITY_ID)
-    assert hass.states.is_state(TEST_ENTITY_ID, "off")
-    assert not mp.is_on(hass, TEST_ENTITY_ID)
+    state = hass.states.get(TEST_ENTITY_ID)
+    assert state.state == "off"
+    assert state.attributes.get("is_on") is False
 
 
 async def test_playing_pausing(hass):
