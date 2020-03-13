@@ -142,6 +142,11 @@ DEVICE_SCHEMA = vol.Schema(
 )
 
 CONF_DISPLAY_NAME = "osd_name"
+CONF_HDMI_PORT = "hdmi_port"
+CONF_USE_AVR = "use_avr"
+
+DEFAULT_HDMI_PORT = 1
+DEFAULT_USE_AVR = False
 
 CONFIG_SCHEMA = vol.Schema(
     {
@@ -153,6 +158,8 @@ CONFIG_SCHEMA = vol.Schema(
                 vol.Optional(CONF_PLATFORM): vol.Any(SWITCH, MEDIA_PLAYER),
                 vol.Optional(CONF_HOST): cv.string,
                 vol.Optional(CONF_DISPLAY_NAME): cv.string,
+                vol.Optional(CONF_HDMI_PORT): cv.positive_int,
+                vol.Optional(CONF_USE_AVR): cv.boolean,
                 vol.Optional(CONF_TYPES, default={}): vol.Schema(
                     {cv.entity_id: vol.Any(MEDIA_PLAYER, SWITCH)}
                 ),
@@ -204,10 +211,15 @@ def setup(hass: HomeAssistant, base_config):
     )
     host = base_config[DOMAIN].get(CONF_HOST)
     display_name = base_config[DOMAIN].get(CONF_DISPLAY_NAME, DEFAULT_DISPLAY_NAME)
+    hdmi_port = base_config[DOMAIN].get(CONF_HDMI_PORT, DEFAULT_HDMI_PORT)
+    use_avr = base_config[DOMAIN].get(CONF_USE_AVR, DEFAULT_USE_AVR)
+    base_device = 5 if use_avr else 0
     if host:
         adapter = TcpAdapter(host, name=display_name, activate_source=False)
     else:
         adapter = CecAdapter(name=display_name[:12], activate_source=False)
+        adapter._cecconfig.iHDMIPort = hdmi_port
+        adapter._cecconfig.baseDevice = base_device
     hdmi_network = HDMINetwork(adapter, loop=loop)
 
     def _volume(call):
