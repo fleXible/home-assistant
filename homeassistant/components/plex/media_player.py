@@ -506,6 +506,11 @@ class PlexMediaPlayer(MediaPlayerEntity):
             return self._volume_level
 
     @property
+    def is_on(self) -> bool:
+        """Return True if entity is on."""
+        return super().is_on and self.state is not STATE_IDLE
+
+    @property
     def is_volume_muted(self):
         """Return boolean if volume is currently muted."""
         if self._is_player_active and self.device:
