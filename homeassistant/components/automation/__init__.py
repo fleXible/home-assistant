@@ -1,6 +1,9 @@
 """Allow to set up simple automation rules via the config file."""
 import logging
-from typing import Any, Awaitable, Callable, List, Optional, Set, cast
+from datetime import datetime
+from numbers import Number
+from types import MappingProxyType
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Set, cast
 
 import voluptuous as vol
 
@@ -25,7 +28,9 @@ from homeassistant.const import (
 from homeassistant.core import (
     Context,
     CoreState,
+    Event,
     HomeAssistant,
+    State,
     callback,
     split_entity_id,
 )
@@ -50,7 +55,8 @@ from homeassistant.helpers.service import async_register_admin_service
 from homeassistant.helpers.trigger import async_initialize_triggers
 from homeassistant.helpers.typing import TemplateVarsType
 from homeassistant.loader import bind_hass
-from homeassistant.util.dt import parse_datetime
+from homeassistant.util import repr_helper
+from homeassistant.util.dt import as_local, parse_datetime
 
 # mypy: allow-untyped-calls, allow-untyped-defs
 # mypy: no-check-untyped-defs, no-warn-return-any
@@ -184,6 +190,38 @@ def devices_in_automation(hass: HomeAssistant, entity_id: str) -> List[str]:
         return []
 
     return list(automation_entity.referenced_devices)
+
+
+def core_object_filter(obj: Any) -> Dict[str, Any]:
+    if not callable(getattr(obj, "as_dict", None)):
+        raise ValueError("Object doesn't support as_dict(): ", obj)
+
+    good_keys = None
+    if isinstance(obj, Event):
+        good_keys = ["event_type", "data"]
+    elif isinstance(obj, State):
+        good_keys = ["entity_id", "state", "attributes"]
+
+    evt_info = {
+        k: v for k, v in obj.as_dict().items() if good_keys is None or k in good_keys
+    }
+    return evt_info
+
+
+def custom_repr_helper(inp: Any) -> str:
+    """Help creating a more readable string representation of objects."""
+    if isinstance(inp, (dict, MappingProxyType)):
+        tmp = ", ".join(
+            f"{repr_helper(key)}={custom_repr_helper(item)}"
+            for key, item in inp.items()
+        )
+        return f"{{{tmp}}}"
+    if isinstance(inp, datetime):
+        return f'"{as_local(inp).isoformat()}"'
+    if isinstance(inp, Number):
+        return str(inp)
+
+    return f'"{inp}"'
 
 
 async def async_setup(hass, config):
@@ -416,11 +454,31 @@ class AutomationEntity(ToggleEntity, RestoreEntity):
         if "trigger" in variables and "description" in variables["trigger"]:
             event_data[ATTR_SOURCE] = variables["trigger"]["description"]
 
+        # Add beautified states from trigger to Event
+        if "trigger" in variables:
+            event_data["trigger"] = {
+                k: core_object_filter(v) if hasattr(v, "as_dict") else v
+                for k, v in variables["trigger"].items()
+                if v is not None
+            }
+
         @callback
         def started_action():
             self.hass.bus.async_fire(
                 EVENT_AUTOMATION_TRIGGERED, event_data, context=trigger_context
             )
+
+        self._logger.info("Executing %s", self._name)
+
+        # Log trigger state details
+        if "trigger" in event_data:
+            trigger_info = ", ".join(
+                [
+                    f"{k}={custom_repr_helper(v)}"
+                    for k, v in event_data["trigger"].items()
+                ]
+            )
+            self._logger.info("Trigger: %s", trigger_info)
 
         try:
             await self.action_script.async_run(
